@@ -1,0 +1,219 @@
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import TrustScore from '@/components/ui/TrustScore'
+
+export default async function DashboardPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth/login')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single()
+
+  const { data: driverProfile } = await supabase
+    .from('driver_profiles')
+    .select('*')
+    .eq('user_id', user.id)
+    .single()
+
+  const { data: myCars } = await supabase
+    .from('cars')
+    .select('*')
+    .eq('owner_id', user.id)
+
+  const { data: myApplications } = await supabase
+    .from('applications')
+    .select('*, cars(make, model, year, price_per_week, location)')
+    .eq('driver_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(5)
+
+  const { data: incomingApplications } = await supabase
+    .from('applications')
+    .select('*, profiles(full_name, phone), driver_profiles(trust_score, rentals_completed, accidents), cars(make, model)')
+    .in('car_id', myCars?.map(c => c.id) || [])
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+
+  const isDriver = profile?.role === 'driver' || profile?.role === 'both'
+  const isOwner = profile?.role === 'owner' || profile?.role === 'both'
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 24px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 40, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 32, fontWeight: 700, color: '#0d1f0e', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+            Welcome back, {profile?.full_name?.split(' ')[0] || 'there'} 👋
+          </h1>
+          <p style={{ margin: 0, color: '#888', fontFamily: 'sans-serif', fontSize: 14 }}>
+            {profile?.role === 'driver' ? 'Driver account' : profile?.role === 'owner' ? 'Owner account' : 'Driver & Owner account'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
+          {isOwner && (
+            <Link href="/cars/new" style={{ background: '#1a2e1a', color: '#fff', borderRadius: 8, padding: '10px 20px', textDecoration: 'none', fontSize: 14, fontFamily: 'sans-serif' }}>
+              + List a Car
+            </Link>
+          )}
+          {isDriver && !driverProfile && (
+            <Link href="/dashboard/driver-setup" style={{ background: '#d4edd8', color: '#1a5c28', borderRadius: 8, padding: '10px 20px', textDecoration: 'none', fontSize: 14, fontFamily: 'sans-serif' }}>
+              Complete Driver Profile
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* DRIVER STATS */}
+      {isDriver && driverProfile && (
+        <section style={{ marginBottom: 48 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0d1f0e', marginBottom: 20 }}>Your Trust Score</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: 20, gridColumn: 'span 2' }}>
+              <TrustScore score={driverProfile.trust_score} size="lg" />
+              <p style={{ margin: '10px 0 0', fontSize: 13, color: '#888', fontFamily: 'sans-serif' }}>
+                Complete more rentals and collect reviews to increase your score
+              </p>
+            </div>
+            {[
+              { label: 'Rentals Completed', value: driverProfile.rentals_completed, icon: '🚗' },
+              { label: 'Late Payments', value: driverProfile.late_payments, icon: '⚠️' },
+              { label: 'Accidents', value: driverProfile.accidents, icon: '💥' },
+            ].map(stat => (
+              <div key={stat.label} style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: 20, textAlign: 'center' }}>
+                <div style={{ fontSize: 28, marginBottom: 4 }}>{stat.icon}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: '#0d1f0e', fontFamily: 'sans-serif' }}>{stat.value}</div>
+                <div style={{ fontSize: 13, color: '#888', fontFamily: 'sans-serif' }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* MY APPLICATIONS */}
+      {isDriver && (
+        <section style={{ marginBottom: 48 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0d1f0e', margin: 0 }}>My Applications</h2>
+            <Link href="/cars" style={{ fontSize: 14, color: '#1a5c28', fontFamily: 'sans-serif', textDecoration: 'none' }}>Browse more cars →</Link>
+          </div>
+          {myApplications && myApplications.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {myApplications.map((app: any) => (
+                <div key={app.id} style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <p style={{ margin: '0 0 2px', fontWeight: 700, color: '#0d1f0e', fontSize: 15 }}>
+                      {app.cars?.make} {app.cars?.model} ({app.cars?.year})
+                    </p>
+                    <p style={{ margin: 0, color: '#888', fontSize: 13, fontFamily: 'sans-serif' }}>
+                      📍 {app.cars?.location} · R{app.cars?.price_per_week?.toLocaleString()}/week
+                    </p>
+                  </div>
+                  <span style={{
+                    padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, fontFamily: 'sans-serif',
+                    background: app.status === 'approved' ? '#d4edd8' : app.status === 'rejected' ? '#fee2e2' : '#fef3c7',
+                    color: app.status === 'approved' ? '#1a5c28' : app.status === 'rejected' ? '#8b2020' : '#7c5c00',
+                  }}>
+                    {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: 32, textAlign: 'center' }}>
+              <p style={{ color: '#888', fontFamily: 'sans-serif', margin: '0 0 12px' }}>No applications yet</p>
+              <Link href="/cars" style={{ color: '#1a5c28', fontFamily: 'sans-serif', textDecoration: 'none', fontSize: 14 }}>Browse available cars →</Link>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* MY CARS (owner) */}
+      {isOwner && (
+        <section style={{ marginBottom: 48 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0d1f0e', margin: 0 }}>My Cars</h2>
+            <Link href="/cars/new" style={{ fontSize: 14, color: '#1a5c28', fontFamily: 'sans-serif', textDecoration: 'none' }}>+ Add car</Link>
+          </div>
+          {myCars && myCars.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {myCars.map((car: any) => (
+                <div key={car.id} style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: '16px 20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0d1f0e' }}>{car.make} {car.model}</h4>
+                    <span style={{
+                      padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, fontFamily: 'sans-serif',
+                      background: car.status === 'available' ? '#d4edd8' : '#fee2e2',
+                      color: car.status === 'available' ? '#1a5c28' : '#8b2020',
+                    }}>{car.status}</span>
+                  </div>
+                  <p style={{ margin: '0 0 12px', color: '#888', fontSize: 13, fontFamily: 'sans-serif' }}>
+                    {car.year} · 📍 {car.location} · R{car.price_per_week?.toLocaleString()}/week
+                  </p>
+                  <Link href={`/cars/${car.id}/manage`} style={{ fontSize: 13, color: '#1a5c28', fontFamily: 'sans-serif', textDecoration: 'none' }}>
+                    Manage →
+                  </Link>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: 32, textAlign: 'center' }}>
+              <p style={{ color: '#888', fontFamily: 'sans-serif', margin: '0 0 12px' }}>You haven&apos;t listed any cars yet</p>
+              <Link href="/cars/new" style={{ color: '#1a5c28', fontFamily: 'sans-serif', textDecoration: 'none', fontSize: 14 }}>List your first car →</Link>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* INCOMING APPLICATIONS (owner) */}
+      {isOwner && incomingApplications && incomingApplications.length > 0 && (
+        <section>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#0d1f0e', marginBottom: 20 }}>
+            Pending Applications ({incomingApplications.length})
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {incomingApplications.map((app: any) => (
+              <ApplicationRow key={app.id} app={app} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function ApplicationRow({ app }: { app: any }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ececea', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      <div>
+        <p style={{ margin: '0 0 2px', fontWeight: 700, color: '#0d1f0e', fontSize: 15 }}>
+          {app.profiles?.full_name}
+        </p>
+        <p style={{ margin: 0, color: '#888', fontSize: 13, fontFamily: 'sans-serif' }}>
+          Applied for {app.cars?.make} {app.cars?.model} · Trust Score: <strong style={{ color: app.driver_profiles?.trust_score >= 80 ? '#1a5c28' : '#7c5c00' }}>{app.driver_profiles?.trust_score}/100</strong>
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <Link href={`/drivers/${app.driver_profiles?.id}`} style={{ border: '1px solid #e0e0e0', background: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontFamily: 'sans-serif', color: '#444', textDecoration: 'none' }}>
+          View Profile
+        </Link>
+        <ApproveButton appId={app.id} />
+      </div>
+    </div>
+  )
+}
+
+function ApproveButton({ appId }: { appId: string }) {
+  'use client'
+  return (
+    <form action={`/api/applications/${appId}/approve`} method="POST" style={{ display: 'inline' }}>
+      <button type="submit" style={{ background: '#1a2e1a', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontFamily: 'sans-serif' }}>
+        Approve
+      </button>
+    </form>
+  )
+}
